@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 
 # 当前脚本版本号
-VERSION='2.1.6 (2026.09.18)'
+VERSION='2.1.8 (2026.10.13)'
 
 # Github 反代加速代理
-GITHUB_PROXY=('https://hub.glowp.xyz/' 'https://proxy.vvvv.ee/')
+GITHUB_PROXY=('https://ghproxy.lvedong.eu.org/' 'https://accel.cloudflare.nyc.mn/')
 
 # 协议列表和对应的节点标签，顺序必须一一对应
 PROTOCOL_LIST=("VLESS + Reality Vision" "Hysteria2" "VLESS + Reality gRPC" "VLESS + WS" "VMess + WS" "Trojan + WS" "Shadowsocks + WS" "VLESS + XHTTP HTTP/1.1 CDN" "VLESS + XHTTP HTTP/2 Reality" "VLESS + XHTTP HTTP/3 Direct" "Trojan Direct" "Shadowsocks 2022 Direct")
@@ -28,7 +28,7 @@ START_PORT_DEFAULT='30000'  # WS/XHTTP 内部端口起始值，各协议在此�
 NGINX_PORT_DEFAULT='8080'   # Nginx 默认端口，可交互修改
 CDN_DOMAIN=("skk.moe" "ip.sb" "time.is" "cfip.xxxxxxxx.tk" "bestcf.top" "cdn.2020111.xyz" "xn--b6gac.eu.org" "cf.090227.xyz")
 SUBSCRIBE_TEMPLATE="https://raw.githubusercontent.com/fscarmen/client_template/main"
-DEFAULT_XRAY_VERSION='26.9.9'
+DEFAULT_XRAY_VERSION='26.10.10'
 IS_SUB=${IS_SUB:-'no_sub'}  # IS_SUB:  根据菜单选项设置 (is_sub / no_sub)
 IS_ARGO=${IS_ARGO:-'no_argo'}  # IS_ARGO: 根据是否安装 WS/XHTTP 协议自动推导 (is_argo / no_argo)
 
@@ -45,8 +45,8 @@ mkdir -p "$TEMP_DIR"
 
 E[0]="Language:\n 1. English (default) \n 2. 简体中文"
 C[0]="${E[0]}"
-E[1]="Migrate WARP chained outbounds from proxySettings to streamSettings.sockopt.dialerProxy for Xray >= 26.9"
-C[1]="兼容 Xray 26.9+：WARP 链式出站由 proxySettings 迁移到 streamSettings.sockopt.dialerProxy"
+E[1]="1. Fix the firewall allow rules being appended after an existing REJECT/DROP rule on the INPUT chain, which left node and CDN ports unreachable on images such as Oracle OCI and OpenVZ; the rules are now inserted before the first REJECT/DROP rule. ufw / firewalld hosts are not affected, as those place allow rules ahead of any terminal rule by design. 2. Fix occasional empty version detection when checking for xray updates, which could abort installation or upgrade; the version is now read from the lightweight releases.atom feed first, with the GitHub API and DEFAULT_XRAY_VERSION as fallbacks. 3. Enable readline line editing on interactive inputs: ← / → move the cursor, Home / End and Ctrl+A / Ctrl+E jump to line start / end, Ctrl+W deletes the previous word, Ctrl+U clears to line start, Ctrl+K deletes to line end, Ctrl+Y undoes the last deletion, Ctrl+L clears the screen; editing keys are no longer inserted into the value. 4. Make the uninstall path offline: argox -u no longer runs CDN detection, so it completes immediately on hosts that cannot reach GitHub; 5. update GitHub proxy CDN endpoints"
+C[1]="1. 修复入站放行规则被追加到 INPUT 链已有的 REJECT/DROP 规则之后，导致甲骨文 OCI、OpenVZ 等镜像上节点端口与 CDN 端口无法访问的问题；放行规则现改为插入到第一条 REJECT/DROP 规则之前。ufw / firewalld 机器不受影响，这类防火墙本身就把放行规则放在终结规则之前; 2. 修复检测 xray 更新时偶尔取不到最新版本号、导致安装或升级中断的问题；改为优先从体积很小的 releases.atom 获取，github api 与 DEFAULT_XRAY_VERSION 作为兜底; 3. 交互输入启用 readline 行编辑：← / → 移动光标，Home / End 与 Ctrl+A / Ctrl+E 跳到行首 / 行尾，Ctrl+W 删除光标前一个词，Ctrl+U 清空到行首，Ctrl+K 删除到行尾，Ctrl+Y 撤销上一次删除，Ctrl+L 清屏；方向键等编辑键不再被当作内容插入输入值; 4. 卸载流程离线化：argox -u 不再执行 CDN 探测，GitHub 不可达时也能立即完成卸载; 5. 更换 GitHub 代理与 CDN 加速节点"
 E[2]="No network interfaces found."
 C[2]="未找到网络接口"
 E[3]="Input errors up to 5 times.The script is aborted."
@@ -413,13 +413,29 @@ E[183]="Port hopping is enabled. Enabling Realm will disable port hopping. Conti
 C[183]="端口跳跃已开启，启用 Realm 将关闭端口跳跃。是否继续？[y/N]（默认 N）:"
 E[184]="Realm is enabled. Enabling port hopping will disable Realm. Continue? [y/N] (default N):"
 C[184]="Realm 已开启，启用端口跳跃将关闭 Realm。是否继续？[y/N]（默认 N）:"
+E[185]="Firewall: the allow rules were inserted before the final REJECT/DROP rule on the INPUT chain, so they now take effect."
+C[185]="防火墙：入站放行规则已插入到 INPUT 链末尾的 REJECT/DROP 规则之前，现已生效。"
+E[186]="Firewall: that REJECT/DROP rule carries match conditions, so the allow rules are not restricted by them. Adjust it manually if this is not intended."
+C[186]="防火墙：该 REJECT/DROP 规则带有匹配条件，放行规则不受其限制。如非预期，请自行调整该规则。"
 
 # 自定义字体彩色，read 函数
 warning() { echo -e "\033[31m\033[01m$*\033[0m"; }         # 红色
 error() { echo -e "\033[31m\033[01m$*\033[0m" && exit 1; } # 红色
 info() { echo -e "\033[32m\033[01m$*\033[0m"; }            # 绿色
 hint() { echo -e "\033[33m\033[01m$*\033[0m"; }            # 黄色
-reading() { read -rp "$(info "$1")" "$2"; }
+# readline 需要用 SOH / STX 包裹不可打印的 ANSI 转义才会算对光标位置，配色与 info 保持一致
+INFO_PROMPT_HEAD=$'\001\033[32m\033[01m\002'
+INFO_PROMPT_TAIL=$'\001\033[0m\002'
+# 交互终端下启用 readline 行编辑：方向键移动光标、Home / End、Delete、Ctrl+A / Ctrl+E / Ctrl+W；
+reading() {
+  local prompt
+  if [[ -t 0 ]]; then
+    printf -v prompt '%b' "$1"
+    read -er -p "$INFO_PROMPT_HEAD$prompt$INFO_PROMPT_TAIL" "$2"
+  else
+    read -rp "$(info "$1")" "$2"
+  fi
+}
 
 # 标记哪些文本需要 eval
 declare -A TEXT_NEEDS_EVAL
@@ -1214,6 +1230,20 @@ check_arch() {
   esac
 }
 
+# 获取 xray 最新版本（含预发布版），三级依次降级
+get_xray_version() {
+  local RESULT_VERSION
+  # 取最新版本：releases.atom → 失败则 GitHub API → 仍失败则 DEFAULT_XRAY_VERSION
+  # atom 约 14 KB 且不占 api 配额；api 级返回 30 条 release 正文约 4 MB，仅作兜底。feed 自带那条 alternate 不含 /tag/v，不会误匹配
+  RESULT_VERSION=$(wget --no-check-certificate --tries=2 --timeout=3 -qO- "${GH_PROXY}https://github.com/XTLS/Xray-core/releases.atom" 2>&1 | sed -n '/alternate/ s#.*/tag/v\([^"]\+\)".*#\1#gp' | sort -Vr | sed -n '1p')
+
+  if grep -q '^$' <<< "$RESULT_VERSION"; then
+    RESULT_VERSION=$(wget --no-check-certificate --tries=2 --timeout=3 -qO- "${GH_PROXY}https://api.github.com/repos/XTLS/Xray-core/releases" 2>&1 | awk -F '["v]' '/"tag_name"/ {print $5}' | sort -Vr | sed -n '1p')
+    grep -q '^$' <<< "$RESULT_VERSION" && RESULT_VERSION="$DEFAULT_XRAY_VERSION"
+  fi
+  echo "$RESULT_VERSION"
+}
+
 # 查安装及运行状态，下标0: argo，下标1: xray，下标2: nginx；状态码: 26 未安装， 27 已安装未运行， 28 运行中
 check_install() {
   # 从 custom 文件读取 IS_SUB/IS_ARGO
@@ -1251,8 +1281,7 @@ check_install() {
   # 后续如果 IS_ARGO=is_argo 再复制到工作目录，减少交互等待时间
   [ ! -s $WORK_DIR/cloudflared ] && { wget --no-check-certificate -qO $TEMP_DIR/cloudflared ${GH_PROXY}https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-$ARGO_ARCH >/dev/null 2>&1 && chmod +x $TEMP_DIR/cloudflared >/dev/null 2>&1; }&
   [[ ${STATUS[1]} = "$(text 26)" ]] && [ ! -s $WORK_DIR/xray ] && {
-    local XRAY_LATEST=$(wget --no-check-certificate -qO- "${GH_PROXY}https://api.github.com/repos/XTLS/Xray-core/releases" | awk -F '["v]' '/tag_name/{print $5}' | sort -rV | sed -n 1p)
-    XRAY_LATEST=${XRAY_LATEST:-$DEFAULT_XRAY_VERSION}
+    local XRAY_LATEST=$(get_xray_version)
     wget --no-check-certificate -qO $TEMP_DIR/Xray.zip ${GH_PROXY}https://github.com/XTLS/Xray-core/releases/download/v${XRAY_LATEST}/Xray-linux-${XRAY_ARCH}.zip >/dev/null 2>&1
     unzip -qo $TEMP_DIR/Xray.zip xray *.dat -d $TEMP_DIR >/dev/null 2>&1
   }&
@@ -1417,12 +1446,18 @@ check_system_ip() {
     elif grep -qi 'cloudflare' <<< "$ASNORG4" && [ -n "$WAN6" ] && ! grep -qi 'cloudflare' <<< "$ASNORG6"; then
       SERVER_IP_DEFAULT=$WAN6
     elif [ -s "$CUSTOM_FILE" ]; then
+      # 已有部署：校验/确认已保存的 serverIp（交互输入后写回 custom，供 fetch_nodes_value 读取）
       local a=6
       until [ -n "$SERVER_IP" ] && is_valid_server_addr "$SERVER_IP"; do
         ((a--)) || true
         [ "$a" = 0 ] && error "\n $(text 3) \n"
         reading "\n $(text 54) " SERVER_IP
       done
+      write_custom 'serverIp' "${SERVER_IP}"
+    else
+      # WAN4/WAN6 均为 Cloudflare（warp/warp-go 全隧穿）或未探测到时：
+      # 用任一非空出口 IP 作为默认，避免 SERVER_IP_DEFAULT 为空导致节点 server 缺失
+      SERVER_IP_DEFAULT=${WAN4:-$WAN6}
     fi
   elif [ -n "$WAN4" ]; then
     SERVER_IP_DEFAULT=$WAN4
@@ -2081,10 +2116,15 @@ parse_preferred_addr() {
 
 # 从已安装的 inbound.json / protocols 等配置文件中读取各参数，供 export_list / change_protocols 复用
 fetch_nodes_value() {
-  unset IS_SUB IS_ARGO SERVER_IP REALITY_PORT REALITY_PUBLIC REALITY_PRIVATE TLS_SERVER SERVER SERVER_PORT SERVER_DISPLAY UUID WS_PATH NODE_NAME SS_WS_METHOD SS_DIRECT_METHOD SS2022_PASSWORD GRPC_PORT HY2_PORT VLESS_WS_PORT VMESS_WS_PORT TROJAN_WS_PORT SS_WS_PORT VLESS_XHTTP_PORT XHTTP_H2_PORT XHTTP_PORT TROJAN_PORT SS2022_PORT SERVER_IP_1 SERVER_IP_2 HY2_UP_NOW HY2_DOWN_NOW
+  unset IS_SUB IS_ARGO SERVER_IP REALITY_PORT REALITY_PUBLIC REALITY_PRIVATE TLS_SERVER SERVER SERVER_PORT SERVER_DISPLAY UUID WS_PATH NODE_NAME SS_WS_METHOD SS_DIRECT_METHOD SS2022_PASSWORD GRPC_PORT HY2_PORT VLESS_WS_PORT VMESS_WS_PORT TROJAN_WS_PORT SS_WS_PORT VLESS_XHTTP_PORT XHTTP_H2_PORT XHTTP_PORT TROJAN_PORT SS2022_PORT SERVER_IP_1 HY2_UP_NOW HY2_DOWN_NOW
 
   [ -s "$CUSTOM_FILE" ] && . "$CUSTOM_FILE"
   SERVER_IP="${serverIp:-}"
+  # custom 中 serverIp 缺失/为空时（如 warp/warp-go 全隧穿、首次安装未写入），
+  # 回退到探测的出口 IP，避免节点 server 字段为空导致订阅不可用
+  if [ -z "$SERVER_IP" ] && { [ -n "$WAN4" ] || [ -n "$WAN6" ]; }; then
+    SERVER_IP="${WAN4:-$WAN6}"
+  fi
   REALITY_PRIVATE="${privateKey:-}"
   REALITY_PUBLIC="${publicKey:-}"
   SERVER="${cdn:-}"
@@ -2164,13 +2204,7 @@ fetch_nodes_value() {
     SERVER_DISPLAY="$SERVER"
   fi
 
-  if [[ "$SERVER_IP" =~ : ]]; then
-    SERVER_IP_1="[$SERVER_IP]"
-    SERVER_IP_2="[[$SERVER_IP]]"
-  else
-    SERVER_IP_1="$SERVER_IP"
-    SERVER_IP_2="$SERVER_IP"
-  fi
+  [[ "$SERVER_IP" =~ : ]] && SERVER_IP_1="[$SERVER_IP]" || SERVER_IP_1="$SERVER_IP"
 
   # 读取 Hysteria2 带宽参数（从订阅文件 proxies 中解析）
   if [ -n "$HY2_PORT" ] && [ -s "${WORK_DIR}/subscribe/proxies" ]; then
@@ -2437,11 +2471,51 @@ add_service_port_rule_ufw() { local COMMENT="ArgoX UFW PORT $1 $2"; [ -z "$1" ] 
 add_service_port_rule_firewalld() { [ -z "$1" ] || [ -z "$2" ] && return 1; firewall-cmd --zone=public --add-port=$2/$1 --permanent >/dev/null 2>&1; }
 del_service_port_rule_firewalld() { [ -z "$1" ] || [ -z "$2" ] && return 0; firewall-cmd --zone=public --remove-port=$2/$1 --permanent >/dev/null 2>&1; }
 service_port_iptables_comment() { echo "ArgoX PORT $1 $2"; }
+# 判断一条 iptables 规则是否带匹配条件，返回 0 = 带条件
+# $1 = iptables -S 输出的单行完整 spec，例如 "-A INPUT -i eth0 -j DROP"
+rule_spec_has_condition() {
+  local SPEC=$1
+  local REST=$(printf '%s\n' "$SPEC" | sed -E 's/^-A INPUT //; s/^-j (REJECT|DROP)( --reject-with [^ ]+)?$//')
+  [ -n "$REST" ]
+}
+# 定位 INPUT 链第一条终止规则（REJECT / DROP）。$1 = iptables | ip6tables
+# 通过全局变量回传，不能用 stdout + 命令替换，否则赋值落在子 shell 中丢失，
+# 行号取空后调用方会静默退回链尾追加，修复失效且无任何报错
+# 全局输出:TERMINAL_LINE / TERMINAL_RULE_SPEC / TERMINAL_HAS_CONDITION；返回 0 = 找到
+iptables_input_terminal_line() {
+  local CMD=$1 OUT
+  TERMINAL_LINE=''; TERMINAL_RULE_SPEC=''; TERMINAL_HAS_CONDITION=no
+  command -v "$CMD" >/dev/null 2>&1 || return 1
+  OUT=$("$CMD" -S INPUT 2>/dev/null | awk '
+    /^-A INPUT/ {
+      n++
+      if (!found && $0 ~ /-j (REJECT|DROP)( |$)/) { found = n; spec = $0 }
+    }
+    END { if (found) printf "%d\t%s\n", found, spec }
+  ') || return 1
+  [ -n "$OUT" ] || return 1
+  TERMINAL_LINE=${OUT%%$'\t'*}; TERMINAL_RULE_SPEC=${OUT#*$'\t'}
+  rule_spec_has_condition "$TERMINAL_RULE_SPEC" && TERMINAL_HAS_CONDITION=yes
+  return 0
+}
+# 优先插入到 INPUT 链第一条 REJECT / DROP 之前；链上无终止规则或插入失败时退回链尾追加。
+# -C / -D 按规则内容匹配，与规则在链内的位置无关，因此插入位置改变后幂等与清理逻辑依然成立。
 add_service_port_rule_iptables() {
   local COMMENT; COMMENT=$(service_port_iptables_comment "$1" "$2")
+  local CMD
   [ -z "$1" ] || [ -z "$2" ] && return 1
-  iptables -C INPUT -p $1 --dport $2 -m comment --comment "$COMMENT" -j ACCEPT >/dev/null 2>&1 || iptables -A INPUT -p $1 --dport $2 -m comment --comment "$COMMENT" -j ACCEPT >/dev/null 2>&1
-  ip6tables -C INPUT -p $1 --dport $2 -m comment --comment "$COMMENT" -j ACCEPT >/dev/null 2>&1 || ip6tables -A INPUT -p $1 --dport $2 -m comment --comment "$COMMENT" -j ACCEPT >/dev/null 2>&1
+  # v4 / v6 分别独立判断：两套链的原有规则可能不同，锚点必须各自计算
+  for CMD in iptables ip6tables; do
+    "$CMD" -C INPUT -p $1 --dport $2 -m comment --comment "$COMMENT" -j ACCEPT >/dev/null 2>&1 && continue
+    if iptables_input_terminal_line "$CMD"; then
+      if "$CMD" -I INPUT "$TERMINAL_LINE" -p $1 --dport $2 -m comment --comment "$COMMENT" -j ACCEPT >/dev/null 2>&1; then
+        IPTABLES_INSERTED_BEFORE_TERMINAL=yes
+        [ "$TERMINAL_HAS_CONDITION" = 'yes' ] && IPTABLES_TERMINAL_CONDITIONAL=yes
+        continue
+      fi
+    fi
+    "$CMD" -A INPUT -p $1 --dport $2 -m comment --comment "$COMMENT" -j ACCEPT >/dev/null 2>&1 || true
+  done
 }
 del_service_port_rule_iptables() {
   local COMMENT; COMMENT=$(service_port_iptables_comment "$1" "$2")
@@ -2576,6 +2650,8 @@ sync_service_firewall_rules() {
   fi
   FW_BACKEND=$(check_firewall_backend)
   purge_service_firewall_rules
+  IPTABLES_INSERTED_BEFORE_TERMINAL=no
+  IPTABLES_TERMINAL_CONDITIONAL=no
   case "$FW_BACKEND" in
     ufw )
       for PORT in "${EXPOSED_TCP_PORTS[@]}"; do add_service_port_rule_ufw tcp "$PORT"; done
@@ -2594,6 +2670,12 @@ sync_service_firewall_rules() {
   : > "$SERVICE_FIREWALL_STATE_FILE"
   for PORT in "${EXPOSED_TCP_PORTS[@]}"; do [ -n "$PORT" ] && echo "tcp $PORT" >> "$SERVICE_FIREWALL_STATE_FILE"; done
   for PORT in "${EXPOSED_UDP_PORTS[@]}"; do [ -n "$PORT" ] && echo "udp $PORT" >> "$SERVICE_FIREWALL_STATE_FILE"; done
+  case "$FW_BACKEND" in
+    alpine-iptables|iptables )
+      [ "$IPTABLES_INSERTED_BEFORE_TERMINAL" = 'yes' ] && hint "\n $(text 185) \n"
+      [ "$IPTABLES_TERMINAL_CONDITIONAL" = 'yes' ] && hint " $(text 186) \n"
+      ;;
+  esac
   reload_or_save_firewall_rules
 }
 
@@ -3625,7 +3707,6 @@ WantedBy=multi-user.target"
         "security": "reality",
         "realitySettings": {
           "show": false,
-          "minClientVer": "1.0.0",
           "dest": "${TLS_SERVER}:443",
           "serverNames": [
             "${TLS_SERVER}"
@@ -3704,7 +3785,6 @@ JSONEOF
         "security": "reality",
         "realitySettings": {
           "show": false,
-          "minClientVer": "1.0.0",
           "dest": "${TLS_SERVER}:443",
           "xver": 0,
           "serverNames": [
@@ -3931,7 +4011,6 @@ JSONEOF
         "security": "reality",
         "realitySettings": {
           "show": false,
-          "minClientVer": "1.0.0",
           "dest": "${TLS_SERVER}:443",
           "xver": 0,
           "serverNames": [
@@ -4447,8 +4526,8 @@ export_list() {
 
   # reality-vision
   grep -q 'reality-vision' <<< "$PROTOS_NOW" && _add \
-    "{name: \"${NODE_NAME} ${NODE_TAG[0]}\", type: vless, server: ${SERVER_IP}, port: ${REALITY_PORT}, uuid: ${UUID}, network: tcp, udp: true, tls: true, servername: ${TLS_SERVER}, flow: xtls-rprx-vision, client-fingerprint: ${FINGER_PRINT:-chrome}, reality-opts: {public-key: ${REALITY_PUBLIC}, short-id: \"\"} }" \
-    "vless://$(echo -n "auto:${UUID}@${SERVER_IP_2}:${REALITY_PORT}" | base64 -w0)?remarks=${NODE_NAME// /%20}%20${NODE_TAG[0]}&obfs=none&tls=1&peer=${TLS_SERVER}&xtls=2&pbk=${REALITY_PUBLIC}" \
+    "{name: \"${NODE_NAME} ${NODE_TAG[0]}\", type: vless, server: ${SERVER_IP}, port: ${REALITY_PORT}, uuid: ${UUID}, network: tcp, udp: true, tls: true, servername: ${TLS_SERVER}, flow: xtls-rprx-vision, client-fingerprint: ${FINGER_PRINT:-chrome}, reality-opts: {public-key: ${REALITY_PUBLIC}, short-id: \"\", support-x25519mlkem768: true} }" \
+    "vless://$(echo -n ":${UUID}@${SERVER_IP_1}:${REALITY_PORT}" | base64 -w0)?remarks=${NODE_NAME// /%20}%20${NODE_TAG[0]}&tls=1&peer=${TLS_SERVER}&udp=1&xtls=2&pbk=${REALITY_PUBLIC}&fingerprint=${FINGER_PRINT:-Chrome140}" \
     "vless://${UUID}@${SERVER_IP_1}:${REALITY_PORT}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${TLS_SERVER}&fp=${FINGER_PRINT:-chrome}&pbk=${REALITY_PUBLIC}&type=tcp&headerType=none#${NODE_NAME// /%20}%20${NODE_TAG[0]}" \
     "{ \"type\":\"vless\", \"tag\":\"${NODE_NAME} ${NODE_TAG[0]}\", \"server\":\"${SERVER_IP}\", \"server_port\": ${REALITY_PORT}, \"uuid\":\"${UUID}\", \"flow\":\"xtls-rprx-vision\", \"packet_encoding\":\"xudp\", \"tls\":{ \"enabled\":true, \"server_name\":\"${TLS_SERVER}\", \"utls\":{ \"enabled\":true, \"fingerprint\":\"${FINGER_PRINT:-chrome}\" }, \"reality\":{ \"enabled\":true, \"public_key\":\"${REALITY_PUBLIC}\", \"short_id\":\"\" } } }" \
     "vless://${UUID}@${SERVER_IP_1}:${REALITY_PORT}?security=reality&sni=${TLS_SERVER}&fp=firefox&pbk=${REALITY_PUBLIC}&type=tcp&flow=xtls-rprx-vision&encryption=none#${NODE_NAME// /%20}%20${NODE_TAG[0]}" \
@@ -4487,8 +4566,8 @@ export_list() {
 
   # reality-grpc
   grep -q 'reality-grpc' <<< "$PROTOS_NOW" && _add \
-    "{name: \"${NODE_NAME} ${NODE_TAG[2]}\", type: vless, server: ${SERVER_IP}, port: ${GRPC_PORT}, uuid: ${UUID}, network: grpc, udp: true, tls: true, servername: ${TLS_SERVER}, flow: , client-fingerprint: ${FINGER_PRINT:-chrome}, reality-opts: {public-key: ${REALITY_PUBLIC}, short-id: \"\"}, grpc-opts: {grpc-service-name: \"grpc\"} }" \
-    "vless://$(echo -n "auto:${UUID}@${SERVER_IP_2}:${GRPC_PORT}" | base64 -w0)?remarks=${NODE_NAME// /%20}%20${NODE_TAG[2]}&path=grpc&obfs=grpc&tls=1&peer=${TLS_SERVER}&pbk=${REALITY_PUBLIC}" \
+    "{name: \"${NODE_NAME} ${NODE_TAG[2]}\", type: vless, server: ${SERVER_IP}, port: ${GRPC_PORT}, uuid: ${UUID}, network: grpc, udp: true, tls: true, servername: ${TLS_SERVER}, flow: , client-fingerprint: ${FINGER_PRINT:-chrome}, reality-opts: {public-key: ${REALITY_PUBLIC}, short-id: \"\", support-x25519mlkem768: true}, grpc-opts: {grpc-service-name: \"grpc\"} }" \
+    "vless://$(echo -n ":${UUID}@${SERVER_IP_1}:${GRPC_PORT}" | base64 -w0)?remarks=${NODE_NAME// /%20}%20${NODE_TAG[2]}&path=grpc&obfs=grpc&tls=1&peer=${TLS_SERVER}&udp=1&pbk=${REALITY_PUBLIC}&fingerprint=${FINGER_PRINT:-Chrome140}" \
     "vless://${UUID}@${SERVER_IP_1}:${GRPC_PORT}?security=reality&sni=${TLS_SERVER}&fp=${FINGER_PRINT:-chrome}&pbk=${REALITY_PUBLIC}&type=grpc&serviceName=grpc&encryption=none#${NODE_NAME// /%20}%20${NODE_TAG[2]}" \
     "{ \"type\": \"vless\", \"tag\":\"${NODE_NAME} ${NODE_TAG[2]}\", \"server\": \"${SERVER_IP}\", \"server_port\": ${GRPC_PORT}, \"uuid\": \"${UUID}\", \"packet_encoding\":\"xudp\", \"tls\": { \"enabled\": true, \"server_name\": \"${TLS_SERVER}\", \"utls\": { \"enabled\": true, \"fingerprint\": \"${FINGER_PRINT:-chrome}\" }, \"reality\": { \"enabled\": true, \"public_key\": \"${REALITY_PUBLIC}\", \"short_id\": \"\" } }, \"transport\": { \"type\": \"grpc\", \"service_name\": \"grpc\" } }" \
     "vless://${UUID}@${SERVER_IP_1}:${GRPC_PORT}?encryption=none&security=reality&sni=${TLS_SERVER}&fp=${FINGER_PRINT:-chrome}&pbk=${REALITY_PUBLIC}&sid&type=grpc&serviceName=grpc&packetEncoding=xudp#${NODE_NAME// /%20}%20${NODE_TAG[2]}" \
@@ -4505,11 +4584,11 @@ export_list() {
 
   # vmess-ws
   grep -q 'vmess-ws' <<< "$PROTOS_NOW" && _add \
-    "{name: \"${NODE_NAME} ${NODE_TAG[4]}\", type: vmess, server: ${SERVER}, port: ${SERVER_PORT_NOW}, uuid: ${UUID}, udp: true, alterId: 0, cipher: none, tls: true, servername: ${ARGO_DOMAIN}, skip-cert-verify: false, network: ws, ws-opts: {path: \"/${WS_PATH}-vm\", headers: {Host: ${ARGO_DOMAIN}}, \"max_early_data\":2560, \"early_data_header_name\":\"Sec-WebSocket-Protocol\"}}" \
-    "vmess://$(echo -n "none:${UUID}@${SERVER}:${SERVER_PORT_NOW}" | base64 -w0)?remarks=${NODE_NAME// /%20}%20${NODE_TAG[4]}&obfsParam=${ARGO_DOMAIN}&path=/${WS_PATH}-vm?ed=2560&obfs=websocket&tls=1&peer=${ARGO_DOMAIN}&alterId=0" \
-    "vmess://$(echo -n "{ \"v\": \"2\", \"ps\": \"${NODE_NAME} ${NODE_TAG[4]}\", \"add\": \"${SERVER}\", \"port\": \"443\", \"id\": \"${UUID}\", \"aid\": \"0\", \"scy\": \"none\", \"net\": \"ws\", \"type\": \"none\", \"host\": \"${ARGO_DOMAIN}\", \"path\": \"/${WS_PATH}-vm?ed=2560\", \"tls\": \"tls\", \"sni\": \"${ARGO_DOMAIN}\", \"alpn\": \"\" }" | base64 -w0)" \
+    "{name: \"${NODE_NAME} ${NODE_TAG[4]}\", type: vmess, server: ${SERVER}, port: ${SERVER_PORT_NOW}, uuid: ${UUID}, udp: true, alterId: 0, cipher: auto, tls: true, servername: ${ARGO_DOMAIN}, skip-cert-verify: false, network: ws, ws-opts: {path: \"/${WS_PATH}-vm\", headers: {Host: ${ARGO_DOMAIN}}, \"max_early_data\":2560, \"early_data_header_name\":\"Sec-WebSocket-Protocol\"}}" \
+    "vmess://$(echo -n "auto:${UUID}@${SERVER}:${SERVER_PORT_NOW}" | base64 -w0)?remarks=${NODE_NAME// /%20}%20${NODE_TAG[4]}&obfsParam=${ARGO_DOMAIN}&path=/${WS_PATH}-vm?ed=2560&obfs=websocket&tls=1&peer=${ARGO_DOMAIN}&alterId=0" \
+    "vmess://$(echo -n "{ \"v\": \"2\", \"ps\": \"${NODE_NAME} ${NODE_TAG[4]}\", \"add\": \"${SERVER}\", \"port\": \"443\", \"id\": \"${UUID}\", \"aid\": \"0\", \"scy\": \"auto\", \"net\": \"ws\", \"type\": \"none\", \"host\": \"${ARGO_DOMAIN}\", \"path\": \"/${WS_PATH}-vm?ed=2560\", \"tls\": \"tls\", \"sni\": \"${ARGO_DOMAIN}\", \"alpn\": \"\" }" | base64 -w0)" \
     "{ \"type\":\"vmess\", \"tag\":\"${NODE_NAME} ${NODE_TAG[4]}\", \"server\":\"${SERVER}\", \"server_port\":${SERVER_PORT_NOW}, \"uuid\":\"${UUID}\", \"tls\": { \"enabled\":true, \"server_name\":\"${ARGO_DOMAIN}\", \"utls\": { \"enabled\":true, \"fingerprint\":\"${FINGER_PRINT:-chrome}\" } }, \"transport\": { \"type\":\"ws\", \"path\":\"/${WS_PATH}-vm\", \"headers\": { \"Host\": \"${ARGO_DOMAIN}\" }, \"max_early_data\":2560, \"early_data_header_name\":\"Sec-WebSocket-Protocol\" } }" \
-    "vmess://${UUID}@${SERVER}:${SERVER_PORT_NOW}?encryption=none&security=tls&sni=${ARGO_DOMAIN}&type=ws&host=${ARGO_DOMAIN}&path=/${WS_PATH}-vm&max_early_data=2560&early_data_header_name=Sec-WebSocket-Protocol#${NODE_NAME// /%20}%20${NODE_TAG[4]}" \
+    "vmess://${UUID}@${SERVER}:${SERVER_PORT_NOW}?encryption=aes-128-gcm&security=tls&sni=${ARGO_DOMAIN}&type=ws&host=${ARGO_DOMAIN}&path=/${WS_PATH}-vm&max_early_data=2560&early_data_header_name=Sec-WebSocket-Protocol#${NODE_NAME// /%20}%20${NODE_TAG[4]}" \
     "${NODE_NAME} ${NODE_TAG[4]}"
 
   # trojan-ws
@@ -4541,8 +4620,8 @@ export_list() {
 
   # xhttp-h2-reality（直连，Reality 安全层，HTTP/2）
   grep -q 'xhttp-h2-reality' <<< "$PROTOS_NOW" && _add \
-    "{name: \"${NODE_NAME} ${NODE_TAG[8]}\", type: vless, server: ${SERVER_IP}, port: ${XHTTP_H2_PORT}, uuid: ${UUID}, udp: true, tls: true, network: xhttp, alpn: [h2], servername: ${TLS_SERVER}, client-fingerprint: ${FINGER_PRINT:-chrome}, reality-opts: {public-key: ${REALITY_PUBLIC}, short-id: \"\"}, xhttp-opts: {path: \"/${WS_PATH}-xh2\", mode: auto} }" \
-    "vless://$(echo -n \"auto:${UUID}@${SERVER_IP_2}:${XHTTP_H2_PORT}\" | base64 -w0)?path=/${WS_PATH}-xh2&remarks=${NODE_NAME// /%20}%20${NODE_TAG[8]}&obfs=xhttp&tls=1&peer=${TLS_SERVER}&alpn=h2&mode=auto&pbk=${REALITY_PUBLIC}" \
+    "{name: \"${NODE_NAME} ${NODE_TAG[8]}\", type: vless, server: ${SERVER_IP}, port: ${XHTTP_H2_PORT}, uuid: ${UUID}, udp: true, tls: true, network: xhttp, alpn: [h2], servername: ${TLS_SERVER}, client-fingerprint: ${FINGER_PRINT:-chrome}, reality-opts: {public-key: ${REALITY_PUBLIC}, short-id: \"\", support-x25519mlkem768: true}, xhttp-opts: {path: \"/${WS_PATH}-xh2\", mode: auto} }" \
+    "vless://$(echo -n \":${UUID}@${SERVER_IP_1}:${XHTTP_H2_PORT}\" | base64 -w0)?path=/${WS_PATH}-xh2&remarks=${NODE_NAME// /%20}%20${NODE_TAG[8]}&obfs=xhttp&tls=1&peer=${TLS_SERVER}&udp=1&alpn=h2&mode=auto&pbk=${REALITY_PUBLIC}&fingerprint=${FINGER_PRINT:-Chrome140}" \
     "vless://${UUID}@${SERVER_IP_1}:${XHTTP_H2_PORT}?encryption=none&security=reality&sni=${TLS_SERVER}&fp=${FINGER_PRINT:-chrome}&pbk=${REALITY_PUBLIC}&type=xhttp&path=%2F${WS_PATH}-xh2&mode=auto#${NODE_NAME// /%20}%20${NODE_TAG[8]}" \
     "" \
     "vless://${UUID}@${SERVER_IP_1}:${XHTTP_H2_PORT}?encryption=none&security=reality&sni=${TLS_SERVER}&fp=${FINGER_PRINT:-chrome}&pbk=${REALITY_PUBLIC}&type=xhttp&path=%2F${WS_PATH}-xh2&mode=auto#${NODE_NAME// /%20}%20${NODE_TAG[8]}" \
@@ -4578,7 +4657,12 @@ export_list() {
   # 写入订阅文件（仅 IS_SUB=is_sub 且有协议时生成；0 协议跳过，避免生成空订阅覆盖现有文件）
   if [ "$IS_SUB" = 'is_sub' ] && [ -n "$PROTOS_NOW" ]; then
     echo -e "$CLASH" > $WORK_DIR/subscribe/proxies
-    wget --no-check-certificate -qO- --tries=3 --timeout=2 ${SUBSCRIBE_TEMPLATE}/clash | sed "s#NODE_NAME#${NODE_NAME}#g; s#PROXY_PROVIDERS_URL#${_SUB_SCHEME}://${_SUB_DOMAIN}/${UUID}/proxies#" > $WORK_DIR/subscribe/clash
+    # 优先用 check_dependencies 已后台缓存的模板，离线/缓存失效时再回退在线拉取
+    if [ -s "$TEMP_DIR/clash" ]; then
+      sed "s#NODE_NAME#${NODE_NAME}#g; s#PROXY_PROVIDERS_URL#${_SUB_SCHEME}://${_SUB_DOMAIN}/${UUID}/proxies#" "$TEMP_DIR/clash" > $WORK_DIR/subscribe/clash
+    else
+      wget --no-check-certificate -qO- --tries=3 --timeout=2 ${SUBSCRIBE_TEMPLATE}/clash | sed "s#NODE_NAME#${NODE_NAME}#g; s#PROXY_PROVIDERS_URL#${_SUB_SCHEME}://${_SUB_DOMAIN}/${UUID}/proxies#" > $WORK_DIR/subscribe/clash
+    fi
     echo -n "$SHADOWROCKET_SUBSCRIBE" | sed -E '/^[ ]*#|^--/d' | sed '/^$/d' | base64 -w0 > $WORK_DIR/subscribe/shadowrocket
     echo -n "$V2RAYN_SUBSCRIBE" | sed -E '/^[ ]*#|^--/d' | sed '/^$/d' | base64 -w0 > $WORK_DIR/subscribe/v2rayn
     echo -n "$THRONE_SUBSCRIBE" | sed -E '/^[ ]*#|^--/d' | sed '/^$/d' | base64 -w0 > $WORK_DIR/subscribe/throne
@@ -4588,7 +4672,13 @@ export_list() {
   local SINGBOX_DISPLAY='' SINGBOX_BLOCK='' SINGBOX_LINK_BLOCK=''
   if ! grep -Eq '^[[:space:]]*(xhttp-h1\.1-cdn|xhttp-h2-reality|xhttp-h3-direct)[[:space:]]*$' <<< "$PROTOS_NOW" || grep -Eq '(^|[[:space:]])(reality-vision|hysteria2|reality-grpc|vless-ws|vmess-ws|trojan-ws|ss-ws|trojan-direct|ss2022-direct)([[:space:]]|$)' <<< "$PROTOS_NOW"; then
     if [ -n "$SINGBOX_OUTBOUNDS" ]; then
-    local SING_BOX_JSON=$(wget --no-check-certificate -qO- --tries=3 --timeout=2 ${SUBSCRIBE_TEMPLATE}/sing-box)
+    # 优先用 check_dependencies 已后台缓存的模板，离线/缓存失效时再回退在线拉取
+    local SING_BOX_JSON=''
+    if [ -s "$TEMP_DIR/sing-box" ]; then
+      SING_BOX_JSON=$(<"$TEMP_DIR/sing-box")
+    else
+      SING_BOX_JSON=$(wget --no-check-certificate -qO- --tries=3 --timeout=2 ${SUBSCRIBE_TEMPLATE}/sing-box)
+    fi
     echo "$SING_BOX_JSON" | sed "s#\"<OUTBOUND_REPLACE>\"#${SINGBOX_OUTBOUNDS}#; s#\"<NODE_REPLACE>\"#${SINGBOX_TAGS}#g" | $WORK_DIR/jq > $WORK_DIR/subscribe/sing-box
     SINGBOX_DISPLAY=$(echo "{ \"outbounds\":[ ${SINGBOX_OUTBOUNDS} ] }" | $WORK_DIR/jq 2>/dev/null)
     SINGBOX_BLOCK="*******************************************
@@ -5183,12 +5273,12 @@ EOF
       trojan-ws) NEW_BLOCK="{\"port\":${TROJAN_WS_PORT},\"listen\":\"127.0.0.1\",\"protocol\":\"trojan\",\"tag\":\"${NODE_NAME} ${NODE_TAG[5]}\",\"settings\":{\"clients\":[{\"password\":\"${UUID}\"}]},\"streamSettings\":{\"network\":\"ws\",\"security\":\"none\",\"wsSettings\":{\"path\":\"/${WS_PATH}-tr\"}},\"sniffing\":{\"enabled\":true,\"destOverride\":[\"http\",\"tls\",\"quic\"],\"metadataOnly\":false}}" ;;
       ss-ws) NEW_BLOCK="{\"port\":${SS_WS_PORT},\"listen\":\"127.0.0.1\",\"protocol\":\"shadowsocks\",\"tag\":\"${NODE_NAME} ${NODE_TAG[6]}\",\"settings\":{\"clients\":[{\"method\":\"${SS_WS_METHOD:-chacha20-ietf-poly1305}\",\"password\":\"${UUID}\"}],\"network\":\"tcp,udp\"},\"streamSettings\":{\"network\":\"ws\",\"wsSettings\":{\"path\":\"/${WS_PATH}-sh\"}},\"sniffing\":{\"enabled\":true,\"destOverride\":[\"http\",\"tls\",\"quic\"],\"metadataOnly\":false}}" ;;
       xhttp-h1.1-cdn) NEW_BLOCK="{\"port\":${VLESS_XHTTP_PORT},\"listen\":\"127.0.0.1\",\"protocol\":\"vless\",\"tag\":\"${NODE_NAME} ${NODE_TAG[7]}\",\"settings\":{\"clients\":[{\"id\":\"${UUID}\",\"level\":0}],\"decryption\":\"none\"},\"streamSettings\":{\"network\":\"xhttp\",\"security\":\"none\",\"xhttpSettings\":{\"path\":\"/${WS_PATH}-xh\",\"mode\":\"auto\"}},\"sniffing\":{\"enabled\":true,\"destOverride\":[\"http\",\"tls\",\"quic\"],\"metadataOnly\":false}}" ;;
-      xhttp-h2-reality) NEW_BLOCK="{\"tag\":\"${NODE_NAME} ${NODE_TAG[8]}\",\"port\":${XHTTP_H2_PORT},\"protocol\":\"vless\",\"settings\":{\"clients\":[{\"id\":\"${UUID}\",\"flow\":\"\"}],\"decryption\":\"none\"},\"streamSettings\":{\"network\":\"xhttp\",\"xhttpSettings\":{\"mode\":\"auto\",\"path\":\"/${WS_PATH}-xh2\"},\"security\":\"reality\",\"realitySettings\":{\"show\":false,\"minClientVer\":\"1.0.0\",\"dest\":\"${TLS_SERVER}:443\",\"xver\":0,\"serverNames\":[\"${TLS_SERVER}\"],\"privateKey\":\"${REALITY_PRIVATE}\",\"publicKey\":\"${REALITY_PUBLIC}\",\"shortIds\":[\"\"],\"alpn\":[\"h2\"]}},\"sniffing\":{\"enabled\":true,\"destOverride\":[\"http\",\"tls\",\"quic\"]}}" ;;
+      xhttp-h2-reality) NEW_BLOCK="{\"tag\":\"${NODE_NAME} ${NODE_TAG[8]}\",\"port\":${XHTTP_H2_PORT},\"protocol\":\"vless\",\"settings\":{\"clients\":[{\"id\":\"${UUID}\",\"flow\":\"\"}],\"decryption\":\"none\"},\"streamSettings\":{\"network\":\"xhttp\",\"xhttpSettings\":{\"mode\":\"auto\",\"path\":\"/${WS_PATH}-xh2\"},\"security\":\"reality\",\"realitySettings\":{\"show\":false,\"dest\":\"${TLS_SERVER}:443\",\"xver\":0,\"serverNames\":[\"${TLS_SERVER}\"],\"privateKey\":\"${REALITY_PRIVATE}\",\"publicKey\":\"${REALITY_PUBLIC}\",\"shortIds\":[\"\"],\"alpn\":[\"h2\"]}},\"sniffing\":{\"enabled\":true,\"destOverride\":[\"http\",\"tls\",\"quic\"]}}" ;;
       xhttp-h3-direct) NEW_BLOCK="{\"tag\":\"${NODE_NAME} ${NODE_TAG[9]}\",\"port\":${XHTTP_PORT},\"protocol\":\"vless\",\"settings\":{\"clients\":[{\"id\":\"${UUID}\"}],\"decryption\":\"none\"},\"streamSettings\":{\"network\":\"xhttp\",\"security\":\"tls\",\"xhttpSettings\":{\"mode\":\"stream-up\",\"extra\":{\"alpn\":[\"h3\"]},\"path\":\"/${WS_PATH}-xh3\"},\"tlsSettings\":{\"serverName\":\"${TLS_SERVER}\",\"alpn\":[\"h3\"],\"certificates\":[{\"certificateFile\":\"${WORK_DIR}/cert/cert.pem\",\"keyFile\":\"${WORK_DIR}/cert/private.key\"}]}},\"sniffing\":{\"enabled\":true,\"destOverride\":[\"http\",\"tls\",\"quic\"]}}" ;;
       trojan-direct) NEW_BLOCK="{\"port\":${TROJAN_PORT},\"protocol\":\"trojan\",\"tag\":\"${NODE_NAME} ${NODE_TAG[10]}\",\"settings\":{\"clients\":[{\"password\":\"${UUID}\"}]},\"streamSettings\":{\"network\":\"tcp\",\"security\":\"tls\",\"tlsSettings\":{\"serverName\":\"${TLS_SERVER}\",\"certificates\":[{\"certificateFile\":\"${WORK_DIR}/cert/cert.pem\",\"keyFile\":\"${WORK_DIR}/cert/private.key\"}]}},\"sniffing\":{\"enabled\":true,\"destOverride\":[\"http\",\"tls\",\"quic\"],\"metadataOnly\":false}}" ;;
       ss2022-direct) NEW_BLOCK="{\"port\":${SS2022_PORT},\"protocol\":\"shadowsocks\",\"tag\":\"${NODE_NAME} ${NODE_TAG[11]}\",\"settings\":{\"method\":\"${SS_DIRECT_METHOD:-2022-blake3-aes-128-gcm}\",\"password\":\"${SS2022_PASSWORD:-$(openssl rand -base64 16)}\",\"network\":\"tcp,udp\"},\"sniffing\":{\"enabled\":true,\"destOverride\":[\"http\",\"tls\",\"quic\"],\"metadataOnly\":false}}" ;;
-      reality-vision) NEW_BLOCK="{\"tag\":\"${NODE_NAME} ${NODE_TAG[0]}\",\"protocol\":\"vless\",\"port\":${REALITY_PORT},\"settings\":{\"clients\":[{\"id\":\"${UUID}\",\"flow\":\"xtls-rprx-vision\"}],\"decryption\":\"none\"},\"streamSettings\":{\"network\":\"tcp\",\"security\":\"reality\",\"realitySettings\":{\"show\":false,\"minClientVer\":\"1.0.0\",\"dest\":\"${TLS_SERVER}:443\",\"xver\":0,\"serverNames\":[\"${TLS_SERVER}\"],\"privateKey\":\"${REALITY_PRIVATE}\",\"publicKey\":\"${REALITY_PUBLIC}\",\"shortIds\":[\"\"]}},\"sniffing\":{\"enabled\":true,\"destOverride\":[\"http\",\"tls\"]}}" ;;
-      reality-grpc) NEW_BLOCK="{\"port\":${GRPC_PORT},\"protocol\":\"vless\",\"tag\":\"${NODE_NAME} ${NODE_TAG[2]}\",\"settings\":{\"clients\":[{\"id\":\"${UUID}\",\"flow\":\"\"}],\"decryption\":\"none\"},\"streamSettings\":{\"network\":\"grpc\",\"security\":\"reality\",\"realitySettings\":{\"show\":false,\"minClientVer\":\"1.0.0\",\"dest\":\"${TLS_SERVER}:443\",\"xver\":0,\"serverNames\":[\"${TLS_SERVER}\"],\"privateKey\":\"${REALITY_PRIVATE}\",\"publicKey\":\"${REALITY_PUBLIC}\",\"shortIds\":[\"\"]},\"grpcSettings\":{\"serviceName\":\"grpc\",\"multiMode\":true}},\"sniffing\":{\"enabled\":true,\"destOverride\":[\"http\",\"tls\"]}}" ;;
+      reality-vision) NEW_BLOCK="{\"tag\":\"${NODE_NAME} ${NODE_TAG[0]}\",\"protocol\":\"vless\",\"port\":${REALITY_PORT},\"settings\":{\"clients\":[{\"id\":\"${UUID}\",\"flow\":\"xtls-rprx-vision\"}],\"decryption\":\"none\"},\"streamSettings\":{\"network\":\"tcp\",\"security\":\"reality\",\"realitySettings\":{\"show\":false,\"dest\":\"${TLS_SERVER}:443\",\"xver\":0,\"serverNames\":[\"${TLS_SERVER}\"],\"privateKey\":\"${REALITY_PRIVATE}\",\"publicKey\":\"${REALITY_PUBLIC}\",\"shortIds\":[\"\"]}},\"sniffing\":{\"enabled\":true,\"destOverride\":[\"http\",\"tls\"]}}" ;;
+      reality-grpc) NEW_BLOCK="{\"port\":${GRPC_PORT},\"protocol\":\"vless\",\"tag\":\"${NODE_NAME} ${NODE_TAG[2]}\",\"settings\":{\"clients\":[{\"id\":\"${UUID}\",\"flow\":\"\"}],\"decryption\":\"none\"},\"streamSettings\":{\"network\":\"grpc\",\"security\":\"reality\",\"realitySettings\":{\"show\":false,\"dest\":\"${TLS_SERVER}:443\",\"xver\":0,\"serverNames\":[\"${TLS_SERVER}\"],\"privateKey\":\"${REALITY_PRIVATE}\",\"publicKey\":\"${REALITY_PUBLIC}\",\"shortIds\":[\"\"]},\"grpcSettings\":{\"serviceName\":\"grpc\",\"multiMode\":true}},\"sniffing\":{\"enabled\":true,\"destOverride\":[\"http\",\"tls\"]}}" ;;
     esac
     if [ -n "$NEW_BLOCK" ] && [ -x "$WORK_DIR/jq" ]; then
       $WORK_DIR/jq --argjson block "$NEW_BLOCK" '.inbounds += [$block]' \
@@ -6501,8 +6591,11 @@ uninstall() {
     cmd_systemctl disable xray >/dev/null 2>&1
     purge_managed_firewall_rules >/dev/null 2>&1 || true
     nginx_stop
-    # 仅当 WORK_DIR/nginx.conf 存在时（即本脚本管理的 nginx 实例）才询问是否卸载
-    [ -s $WORK_DIR/nginx.conf ] && command -v nginx >/dev/null 2>&1 && {
+    # 等待 argo / xray / nginx 真正停止，避免紧接着 rm -rf 与运行中的进程抢文件；上限与 sing-box.sh 一致
+    sleep 0.5
+    # 仅当 WORK_DIR/nginx.conf 存在（即本脚本管理的 nginx 实例）且 nginx 已完全停止时才询问是否卸载，
+    # 否则会在 nginx 仍在运行时把它卸载掉
+    [[ -s $WORK_DIR/nginx.conf && "$(ps -ef | grep -c '[n]ginx')" = 0 ]] && command -v nginx >/dev/null 2>&1 && {
       reading "\n $(text 65) " REMOVE_NGINX
       [ "${REMOVE_NGINX,,}" = 'y' ] && ${PACKAGE_UNINSTALL[int]} nginx >/dev/null 2>&1
     }
@@ -6515,14 +6608,13 @@ uninstall() {
 
 # Argo 与 Xray 的最新版本
 version() {
-  local ONLINE=$(wget --no-check-certificate -qO- "${GH_PROXY}https://api.github.com/repos/cloudflare/cloudflared/releases/latest" | grep "tag_name" | cut -d \" -f4)
+  local ONLINE=$(wget --no-check-certificate --tries=2 --timeout=3 -qO- "${GH_PROXY}https://api.github.com/repos/cloudflare/cloudflared/releases/latest" | grep "tag_name" | cut -d \" -f4)
   [ -z "$ONLINE" ] && error " $(text 74) "
   local LOCAL=$($WORK_DIR/cloudflared -v | awk '{for (i=1; i<NF; i++) if ($i=="version") {print $(i+1); exit}}')
   local APP=ARGO && info "\n $(text 43) "
   [[ -n "$ONLINE" && "$ONLINE" != "$LOCAL" ]] && reading "\n $(text 9) " UPDATE[0] || info " $(text 44) "
 
-  ONLINE=$(wget --no-check-certificate -qO- "${GH_PROXY}https://api.github.com/repos/XTLS/Xray-core/releases" | awk -F '["v]' '/tag_name/{print $5}' | sort -rV | sed -n 1p)
-  [ -z "$ONLINE" ] && error " $(text 74) "
+  ONLINE=$(get_xray_version)
   LOCAL=$($WORK_DIR/xray version | awk '{for (i=1; i<NF; i++) if ($i=="Xray") {print $(i+1); exit}}')
   local APP=Xray && info "\n $(text 43) "
   [[ -n "$ONLINE" && "$ONLINE" != "$LOCAL" ]] && reading "\n $(text 9) " UPDATE[1] || info " $(text 44) "
@@ -6725,7 +6817,13 @@ menu() {
   fi
 }
 
-check_cdn
+# 卸载是纯本地操作：-U / -u 时置位，作为下方所有网络动作的总开关
+# 首尾补空格并用 [[:space:]] 锚定，避免长参数中含 -U 时被误判
+[[ " ${*^^} " =~ [[:space:]]-U([[:space:]]|$) ]] && IS_UNINSTALL='is_uninstall'
+
+# 卸载是纯本地操作：跳过 CDN 探测，保证离线 / 弱网下立即进入卸载
+# 注：运行统计为后台执行不阻塞卸载，必须与守卫分开成行
+[ "$IS_UNINSTALL" != 'is_uninstall' ] && check_cdn
 statistics_of_run-times update argox.sh 2>/dev/null
 
 ###### API 端口统一收口：custom 不再保存 apiPort，一律以 inbound.json 的 api.listen 为准（仅清理一次）,将于 2026年10月31日移除
@@ -6862,6 +6960,61 @@ if [ -x "$WORK_DIR/jq" ] && [ -s "$WORK_DIR/outbound.json" ] && [[ "$(date +%Y%m
     fi
     unset _warp_cfg_ok _warp_loaded _warp_api_port _warp_tag
   fi
+fi
+
+###### VMess 加密方式迁移：Xray ≥26.7.11 已移除 VMess 的 none / zero（空加密载荷），将于 2026年12月31日移除
+###### 检测订阅文件中 vmess-ws 节点的 none / zero 并就地改写为 auto：clash / proxies 明文直改；throne 单层 base64；shadowrocket / v2rayn 的加密方式藏在内层 base64，需解两层再回编
+###### 新装实例由 export_list 直接输出 auto，此处只兜底旧订阅；仅处理 vmess 节点，vless / trojan / ss 链接（含 encryption=none）一律不动
+if [ -d "$WORK_DIR/subscribe" ] && [[ "$(date +%Y%m%d)" < "20270101" ]]; then
+
+  # 1) 明文订阅（clash / proxies）：ss 的 cipher 取值不同，不会误伤
+  for _vm_f in clash proxies; do
+    [ -s "$WORK_DIR/subscribe/$_vm_f" ] || continue
+    grep -Eq 'cipher: *(none|zero)' "$WORK_DIR/subscribe/$_vm_f" 2>/dev/null \
+      && sed -i -e 's/cipher: none/cipher: auto/g' -e 's/cipher: zero/cipher: auto/g' "$WORK_DIR/subscribe/$_vm_f"
+  done
+
+  # 2) 单层 base64 订阅（throne）：只改写 vmess:// 行的 encryption 参数
+  if [ -s "$WORK_DIR/subscribe/throne" ] && base64 -d "$WORK_DIR/subscribe/throne" > "$TEMP_DIR/sub_throne.txt" 2>/dev/null \
+    && grep -Eq '^vmess://.*encryption=(none|zero|auto)' "$TEMP_DIR/sub_throne.txt"; then
+    sed -i '/^vmess:\/\//{s/encryption=none/encryption=aes-128-gcm/;s/encryption=zero/encryption=aes-128-gcm/;s/encryption=auto/encryption=aes-128-gcm/}' "$TEMP_DIR/sub_throne.txt"
+    base64 -w0 < "$TEMP_DIR/sub_throne.txt" > "$WORK_DIR/subscribe/throne.new" 2>/dev/null \
+      && mv "$WORK_DIR/subscribe/throne.new" "$WORK_DIR/subscribe/throne"
+    rm -f "$TEMP_DIR/sub_throne.txt"
+  fi
+
+  # 3) 双层 base64 订阅（shadowrocket / v2rayn）：内层分别是 "cipher:uuid@host:port" 与含 "scy" 的 JSON，解开后统一按行首/scy 改写
+  for _vm_f in shadowrocket v2rayn; do
+    [ -s "$WORK_DIR/subscribe/$_vm_f" ] || continue
+    base64 -d "$WORK_DIR/subscribe/$_vm_f" > "$TEMP_DIR/sub_$_vm_f.txt" 2>/dev/null || continue
+    _vm_hit=false
+    while IFS= read -r _vm_line || [ -n "$_vm_line" ]; do
+      case "$_vm_line" in
+        vmess://*)
+          _vm_rest="${_vm_line#vmess://}"
+          _vm_core="${_vm_rest%%[?#]*}"
+          _vm_more=''
+          [ "$_vm_rest" != "$_vm_core" ] && _vm_more="${_vm_rest#"$_vm_core"}"
+          _vm_body=$(printf '%s' "$_vm_core" | base64 -d 2>/dev/null)
+          _vm_new=$(printf '%s' "$_vm_body" | sed -e 's/^none:/auto:/' -e 's/^zero:/auto:/' -e 's/"scy": *"none"/"scy": "auto"/' -e 's/"scy": *"zero"/"scy": "auto"/')
+          if [ -n "$_vm_body" ] && [ "$_vm_new" != "$_vm_body" ]; then
+            _vm_core=$(printf '%s' "$_vm_new" | base64 -w0)
+            _vm_hit=true
+          fi
+          printf 'vmess://%s%s\n' "$_vm_core" "$_vm_more"
+          ;;
+        *)
+          printf '%s\n' "$_vm_line"
+          ;;
+      esac
+    done < "$TEMP_DIR/sub_$_vm_f.txt" > "$TEMP_DIR/sub_$_vm_f.new"
+    if [ "$_vm_hit" = 'true' ] && [ -s "$TEMP_DIR/sub_$_vm_f.new" ]; then
+      base64 -w0 < "$TEMP_DIR/sub_$_vm_f.new" > "$WORK_DIR/subscribe/$_vm_f.new" 2>/dev/null \
+        && mv "$WORK_DIR/subscribe/$_vm_f.new" "$WORK_DIR/subscribe/$_vm_f"
+    fi
+    rm -f "$TEMP_DIR/sub_$_vm_f.txt" "$TEMP_DIR/sub_$_vm_f.new"
+  done
+  unset _vm_f _vm_line _vm_rest _vm_core _vm_more _vm_body _vm_new _vm_hit
 fi
 
 # ── 传参处理1: 语言识别 + SKIP_MENU 检测（在 select_language 之前） ──

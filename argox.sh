@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # 当前脚本版本号
-VERSION='2.1.8 (2026.10.13)'
+VERSION='2.1.9 (2026.10.22)'
 
 # Github 反代加速代理
 GITHUB_PROXY=('https://ghproxy.lvedong.eu.org/' 'https://accel.cloudflare.nyc.mn/')
@@ -45,8 +45,8 @@ mkdir -p "$TEMP_DIR"
 
 E[0]="Language:\n 1. English (default) \n 2. 简体中文"
 C[0]="${E[0]}"
-E[1]="1. Fix the firewall allow rules being appended after an existing REJECT/DROP rule on the INPUT chain, which left node and CDN ports unreachable on images such as Oracle OCI and OpenVZ; the rules are now inserted before the first REJECT/DROP rule. ufw / firewalld hosts are not affected, as those place allow rules ahead of any terminal rule by design. 2. Fix occasional empty version detection when checking for xray updates, which could abort installation or upgrade; the version is now read from the lightweight releases.atom feed first, with the GitHub API and DEFAULT_XRAY_VERSION as fallbacks. 3. Enable readline line editing on interactive inputs: ← / → move the cursor, Home / End and Ctrl+A / Ctrl+E jump to line start / end, Ctrl+W deletes the previous word, Ctrl+U clears to line start, Ctrl+K deletes to line end, Ctrl+Y undoes the last deletion, Ctrl+L clears the screen; editing keys are no longer inserted into the value. 4. Make the uninstall path offline: argox -u no longer runs CDN detection, so it completes immediately on hosts that cannot reach GitHub; 5. update GitHub proxy CDN endpoints"
-C[1]="1. 修复入站放行规则被追加到 INPUT 链已有的 REJECT/DROP 规则之后，导致甲骨文 OCI、OpenVZ 等镜像上节点端口与 CDN 端口无法访问的问题；放行规则现改为插入到第一条 REJECT/DROP 规则之前。ufw / firewalld 机器不受影响，这类防火墙本身就把放行规则放在终结规则之前; 2. 修复检测 xray 更新时偶尔取不到最新版本号、导致安装或升级中断的问题；改为优先从体积很小的 releases.atom 获取，github api 与 DEFAULT_XRAY_VERSION 作为兜底; 3. 交互输入启用 readline 行编辑：← / → 移动光标，Home / End 与 Ctrl+A / Ctrl+E 跳到行首 / 行尾，Ctrl+W 删除光标前一个词，Ctrl+U 清空到行首，Ctrl+K 删除到行尾，Ctrl+Y 撤销上一次删除，Ctrl+L 清屏；方向键等编辑键不再被当作内容插入输入值; 4. 卸载流程离线化：argox -u 不再执行 CDN 探测，GitHub 不可达时也能立即完成卸载; 5. 更换 GitHub 代理与 CDN 加速节点"
+E[1]="Harden the argox -v upgrade flow: the cloudflared version is now checked only when Argo is installed and with a longer timeout; the old xray binary is backed up before the upgrade and restored automatically if the new version fails to start; the tunnel domain and node info are refreshed after upgrading a quick tunnel"
+C[1]="加固 argox -v 升级流程：仅在已安装 Argo 时检测 cloudflared 版本并放宽超时；升级 xray 前先备份旧版本，新版本启动失败时自动恢复；升级临时隧道后刷新隧道域名与节点信息"
 E[2]="No network interfaces found."
 C[2]="未找到网络接口"
 E[3]="Input errors up to 5 times.The script is aborted."
@@ -397,8 +397,8 @@ E[175]="Enter WARP reserved values (format: 123,456,789):"
 C[175]="请输入 WARP reserved 保留值（格式: 123,456,789）:"
 E[176]="Invalid reserved format. Please enter 3 numbers like 123,456,789"
 C[176]="reserved 格式错误，请输入 3 个数字，如 123,456,789"
-E[177]=""
-C[177]=""
+E[177]="Failed to restore old version \$LOCAL, please check manually"
+C[177]="恢复旧版本 \$LOCAL 失败，请手动检查"
 E[178]="Change WARP endpoint"
 C[178]="更换 warp endpoint"
 E[179]="Invalid private key format. Please enter a 43-character base64 key ending with \"=\"."
@@ -417,6 +417,12 @@ E[185]="Firewall: the allow rules were inserted before the final REJECT/DROP rul
 C[185]="防火墙：入站放行规则已插入到 INPUT 链末尾的 REJECT/DROP 规则之前，现已生效。"
 E[186]="Firewall: that REJECT/DROP rule carries match conditions, so the allow rules are not restricted by them. Adjust it manually if this is not intended."
 C[186]="防火墙：该 REJECT/DROP 规则带有匹配条件，放行规则不受其限制。如非预期，请自行调整该规则。"
+E[187]="Backing up old version xray to \${WORK_DIR}/xray.bak"
+C[187]="已备份旧版本 xray 到 \${WORK_DIR}/xray.bak"
+E[188]="New version failed to run \$ONLINE, restoring old version \$LOCAL ..."
+C[188]="新版本 \$ONLINE 运行失败，正在恢复旧版本 \$LOCAL ..."
+E[189]="Successfully restored old version \$LOCAL"
+C[189]="已成功恢复旧版本 \$LOCAL"
 
 # 自定义字体彩色，read 函数
 warning() { echo -e "\033[31m\033[01m$*\033[0m"; }         # 红色
@@ -6608,14 +6614,20 @@ uninstall() {
 
 # Argo 与 Xray 的最新版本
 version() {
-  local ONLINE=$(wget --no-check-certificate --tries=2 --timeout=3 -qO- "${GH_PROXY}https://api.github.com/repos/cloudflare/cloudflared/releases/latest" | grep "tag_name" | cut -d \" -f4)
-  [ -z "$ONLINE" ] && error " $(text 74) "
-  local LOCAL=$($WORK_DIR/cloudflared -v | awk '{for (i=1; i<NF; i++) if ($i=="version") {print $(i+1); exit}}')
-  local APP=ARGO && info "\n $(text 43) "
-  [[ -n "$ONLINE" && "$ONLINE" != "$LOCAL" ]] && reading "\n $(text 9) " UPDATE[0] || info " $(text 44) "
+  # Argo (cloudflared) 版本检测：仅在已部署 Argo（守护进程文件存在）时进行
+  local ARGO_ONLINE ARGO_LOCAL
+  if [ -s ${ARGO_DAEMON_FILE} ]; then
+    ARGO_ONLINE=$(wget --no-check-certificate --tries=2 --timeout=10 -qO- "${GH_PROXY}https://api.github.com/repos/cloudflare/cloudflared/releases/latest" | grep "tag_name" | cut -d \" -f4)
+    grep -q '.' <<< "$ARGO_ONLINE" || error " $(text 74) \n"
+    ARGO_LOCAL=$($WORK_DIR/cloudflared -v | awk '{for (i=1; i<NF; i++) if ($i=="version") {print $(i+1); exit}}')
+    local APP=ARGO && info "\n $(text 43) "
+    [[ -n "$ARGO_ONLINE" && "$ARGO_ONLINE" != "$ARGO_LOCAL" ]] && reading "\n $(text 9) " UPDATE[0] || info " $(text 44) "
+  fi
 
-  ONLINE=$(get_xray_version)
-  LOCAL=$($WORK_DIR/xray version | awk '{for (i=1; i<NF; i++) if ($i=="Xray") {print $(i+1); exit}}')
+  # Xray 版本检测
+  local ONLINE=$(get_xray_version)
+  [ -z "$ONLINE" ] && error " $(text 74) "
+  local LOCAL=$($WORK_DIR/xray version | awk '{for (i=1; i<NF; i++) if ($i=="Xray") {print $(i+1); exit}}')
   local APP=Xray && info "\n $(text 43) "
   [[ -n "$ONLINE" && "$ONLINE" != "$LOCAL" ]] && reading "\n $(text 9) " UPDATE[1] || info " $(text 44) "
 
@@ -6646,12 +6658,35 @@ version() {
     done
     if [ -s "$TEMP_DIR/Xray-linux-$XRAY_ARCH.zip" ]; then
       cmd_systemctl disable xray
+      # 备份旧版本，新版本启动失败时自动回滚
+      cp ${WORK_DIR}/xray ${WORK_DIR}/xray.bak
+      hint "\n $(text 187) \n"
       unzip -qo "$TEMP_DIR/Xray-linux-$XRAY_ARCH.zip" xray *.dat -d $WORK_DIR >/dev/null 2>&1; rm -f $TEMP_DIR/Xray*.zip
+      chmod +x ${WORK_DIR}/xray
       cmd_systemctl enable xray
-      cmd_systemctl status xray &>/dev/null && info " Xray $(text 28) $(text 37)" || error " Xray $(text 28) $(text 38) "
+      sleep 2
+      # 检查新版本是否成功运行
+      if cmd_systemctl status xray &>/dev/null; then
+        # 运行成功，删除备份
+        rm -f ${WORK_DIR}/xray.bak
+        info " Xray $(text 28) $(text 37) "
+      else
+        # 运行失败，恢复旧版本
+        warning "\n $(text 188) \n"
+        mv ${WORK_DIR}/xray.bak ${WORK_DIR}/xray
+        cmd_systemctl enable xray
+        sleep 2
+        cmd_systemctl status xray &>/dev/null && info "\n $(text 189) \n" || error "\n $(text 177) \n"
+      fi
     else
       local APP=Xray && error "\n $(text 48) "
     fi
+  fi
+
+  # 全部升级完成后统一处理：仅当升级过 Argo 且当前是临时隧道（--url）时，重启后隧道域名会变化，需重新获取并刷新节点信息
+  if [ "${UPDATE[0],,}" = 'y' ] && grep -qs "^${DAEMON_RUN_PATTERN}.*--url" ${ARGO_DAEMON_FILE} && cmd_systemctl status argo &>/dev/null; then
+    fetch_tunnel_domain quick
+    export_list
   fi
 }
 
